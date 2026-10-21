@@ -4,7 +4,9 @@
 
 `.github/workflows/publish-baitu.yml` 从对应 tag 的原始 podspec 生成 `BTSwiftProtobuf`，保留上游编译参数、平台和源码配置，独立设置 Swift 模块及隐私资源 bundle 名称，并使用静态 framework。通过 CocoaPods iOS 编译验证后，发布包含 JSON podspec 和 SHA-256 的 GitHub Release。已发布版本不可覆盖；未完成的 draft 可以重试。
 
-`BaiTu-iOS/baitu-specs` 的 `sync-btswiftprotobuf.yml` 每小时校验并拉取这些产物，写入 `BTSwiftProtobuf/<版本>/BTSwiftProtobuf.podspec.json`。两个 workflow 都支持手动运行，只使用各自仓库的 `GITHUB_TOKEN`，不需要跨仓库 PAT。
+`BaiTu-iOS/baitu-specs` 的 `sync-btswiftprotobuf.yml` 每小时校验并拉取这些产物，写入 `BTSwiftProtobuf/<版本>/BTSwiftProtobuf.podspec.json`。两个 workflow 都支持手动运行，不需要跨仓库 PAT。
+
+fork 使用仅对本仓库有写权限的 SSH deploy key 同步 tag，私钥保存在 Actions secret `UPSTREAM_SYNC_SSH_KEY`。这是因为上游 tag 包含 workflow 文件，默认 `GITHUB_TOKEN` 无权创建这些引用。Release API 和 specs 入库仍使用各自仓库的 `GITHUB_TOKEN`。轮换时同时更新 deploy key 与对应 secret。
 
 ```ruby
 source 'https://github.com/BaiTu-iOS/baitu-specs.git'
