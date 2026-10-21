@@ -1,0 +1,69 @@
+# Created by yuxilong on 2026/10/21.
+name: Sync and validate BTSwiftProtobuf
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: baitu-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'BaiTu-iOS/swift-protobuf'
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - name: Install CocoaPods
+        run: gem install cocoapods --version 1.16.2 --no-document
+      - name: Test spec conversion
+        run: bash .github/scripts/test-baitu-spec.sh
+      - name: Sync stable tags and publish validated specs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp 'repos/apple/swift-protobuf/releases?per_page=100' > "$RUNNER_TEMP/releases.json"
+          jq -r '.[][] | select(.draft == false and .prerelease == false)
+            | .tag_name | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
+            | select((split(".") | map(tonumber)) >= [1,39,0])' "$RUNNER_TEMP/releases.json" > "$RUNNER_TEMP/tags"
+          while IFS= read -r version; do
+            # A published spec is immutable; interrupted drafts are retried.
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/fork-releases.json"
+            if jq -e --arg tag "$version" '.[][] | select(.tag_name == $tag and .draft == false)
+              | .assets | map(.name) | index("BTSwiftProtobuf.podspec.json") != null' "$RUNNER_TEMP/fork-releases.json" >/dev/null; then
+              continue
+            fi
+            git fetch https://github.com/apple/swift-protobuf.git "refs/tags/$version"
+            upstream=$(git rev-parse FETCH_HEAD)
+            if git show-ref --verify --quiet "refs/tags/$version"; then
+              test "$(git rev-parse "refs/tags/$version")" = "$upstream"
+            else
+              git tag "$version" "$upstream"
+            fi
+            git push origin "refs/tags/$version"
+            source_dir="$RUNNER_TEMP/source-$version"
+            mkdir -p "$source_dir"
+            git archive "$version" | tar -x -C "$source_dir"
+            pod ipc spec "$source_dir/SwiftProtobuf.podspec" > "$RUNNER_TEMP/upstream.json"
+            jq --arg version "$version" -f .github/scripts/baitu-spec.jq "$RUNNER_TEMP/upstream.json" > "$RUNNER_TEMP/BTSwiftProtobuf.podspec.json"
+            pod spec lint "$RUNNER_TEMP/BTSwiftProtobuf.podspec.json" --platforms=ios --allow-warnings
+            (
+              cd "$RUNNER_TEMP"
+              shasum -a 256 BTSwiftProtobuf.podspec.json > BTSwiftProtobuf.podspec.json.sha256
+            )
+            if ! jq -e --arg tag "$version" '.[][] | select(.tag_name == $tag)' "$RUNNER_TEMP/fork-releases.json" >/dev/null; then
+              gh release create "$version" --verify-tag --draft --title "BTSwiftProtobuf $version" \
+                --notes "Upstream: https://github.com/apple/swift-protobuf/releases/tag/$version. CocoaPods iOS lint passed with independent module BTSwiftProtobuf."
+            fi
+            gh release upload "$version" "$RUNNER_TEMP/BTSwiftProtobuf.podspec.json" "$RUNNER_TEMP/BTSwiftProtobuf.podspec.json.sha256" --clobber
+            gh release edit "$version" --draft=false
+          done < "$RUNNER_TEMP/tags"
