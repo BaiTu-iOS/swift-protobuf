@@ -1,0 +1,28 @@
+# Created by yuxilong on 2026/11/02.
+name: Retry BTSwiftProtobuf runner allocation
+on:
+  workflow_run:
+    workflows: [Sync and validate BTSwiftProtobuf]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  checks: read
+  actions: write
+jobs:
+  retry:
+    if: github.repository == 'BaiTu-iOS/swift-protobuf' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          persist-credentials: false
+      - name: Test retry policy
+        run: node --test .github/scripts/test-retry-baitu.cjs
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const retry = require('./.github/scripts/retry-baitu.cjs');
+            await retry({ github, context, core });
