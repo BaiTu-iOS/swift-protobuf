@@ -14,7 +14,13 @@ jobs:
     if: github.repository == 'BaiTu-iOS/swift-protobuf'
     runs-on: macos-15
     timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.0.1.app/Contents/Developer
     steps:
+      - name: Show Xcode and Swift versions
+        run: |
+          xcodebuild -version
+          xcrun swift --version
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
